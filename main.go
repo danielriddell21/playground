@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"playground/internal/graphql"
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
 )
@@ -15,6 +16,7 @@ func main() {
 		Use:   "playground",
 		Short: "playgrounds for tools worth messing around with",
 	}
+	root.AddCommand(graphql.Command())
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(postgres.Command())
 
