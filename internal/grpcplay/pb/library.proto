@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package library;
+
+option go_package = "playground/internal/grpcplay/pb";
+
+message BookRequest {
+  string id = 1;
+}
+
+message Book {
+  string id = 1;
+  string title = 2;
+  int32 year = 3;
+  repeated string tags = 4;
+}
+
+message SearchRequest {
+  string term = 1;
+}
+
+message UploadSummary {
+  int32 accepted = 1;
+  int32 rejected = 2;
+}
+
+message ChatMessage {
+  string from = 1;
+  string text = 2;
+}
+
+service Library {
+  rpc GetBook(BookRequest) returns (Book);
+  rpc Search(SearchRequest) returns (stream Book);
+  rpc Upload(stream Book) returns (UploadSummary);
+  rpc Chat(stream ChatMessage) returns (stream ChatMessage);
+}
