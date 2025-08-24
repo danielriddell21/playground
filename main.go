@@ -8,6 +8,7 @@ import (
 
 	"playground/internal/graphql"
 	grpcplay "playground/internal/grpcplay"
+	"playground/internal/kafka"
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
 )
@@ -19,6 +20,7 @@ func main() {
 	}
 	root.AddCommand(graphql.Command())
 	root.AddCommand(grpcplay.Command())
+	root.AddCommand(kafka.Command())
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(postgres.Command())
 
