@@ -9,6 +9,14 @@ docker compose up -d
 go run . postgres all
 ```
 
+Or put the backing services in kubernetes instead of compose:
+
+```
+kubectl apply -f deploy/k8s
+```
+
+Node ports are 30432 postgres, 30092 kafka, 30379 redis.
+
 ## Tools
 
 ```
