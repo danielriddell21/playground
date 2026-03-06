@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -114,6 +115,45 @@ func rangeText(r pgtype.Range[any]) string {
 		upper = ")"
 	}
 	return lower + play.Cell(r.Lower) + "," + play.Cell(r.Upper) + upper
+}
+
+func (s *Session) ExpectError(sql string, args ...any) {
+	if s.err != nil {
+		return
+	}
+	if _, err := s.conn.Exec(s.ctx, sql, args...); err != nil {
+		fmt.Println("rejected:", err)
+		return
+	}
+	s.err = fmt.Errorf("expected a rejection but it succeeded\n%s", sql)
+}
+
+func (s *Session) CopyOut(sql string) {
+	if s.err != nil {
+		return
+	}
+	var buf bytes.Buffer
+	if _, err := s.conn.Conn().PgConn().CopyTo(s.ctx, &buf, sql); err != nil {
+		s.err = fmt.Errorf("%w\n%s", err, sql)
+		return
+	}
+	fmt.Print(buf.String())
+}
+
+func (s *Session) AtLeast(major int) bool {
+	if s.err != nil {
+		return false
+	}
+	var num int
+	if err := s.conn.QueryRow(s.ctx, `select current_setting('server_version_num')::int`).Scan(&num); err != nil {
+		s.err = err
+		return false
+	}
+	if num/10000 < major {
+		fmt.Printf("skipped: needs postgres %d, server is %d.%d\n", major, num/10000, num%10000)
+		return false
+	}
+	return true
 }
 
 func (s *Session) Note(format string, args ...any) {
