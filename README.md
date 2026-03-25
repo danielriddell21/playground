@@ -24,6 +24,7 @@ go run . graphql all       nothing needed
 go run . grpc all          nothing needed
 go run . kafka all         needs kafka
 go run . postgres all      needs postgres
+go run . sqlc all          needs postgres + sqlc cli
 ```
 
 `go run . <tool> --help` lists the demos. `--dsn` overrides the connection.
