@@ -26,6 +26,7 @@ go run . kafka all         needs kafka
 go run . postgres all      needs postgres
 go run . sqlc all          needs postgres + sqlc cli
 go run . openfga all       needs the openfga binary
+go run . melange all       needs postgres + melange cli
 ```
 
 `go run . <tool> --help` lists the demos. `--dsn` overrides the connection.

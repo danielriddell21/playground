@@ -9,6 +9,7 @@ import (
 	"playground/internal/graphql"
 	grpcplay "playground/internal/grpcplay"
 	"playground/internal/kafka"
+	"playground/internal/melange"
 	fga "playground/internal/openfga"
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
@@ -26,6 +27,7 @@ func main() {
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(sqlcplay.Command())
 	root.AddCommand(fga.Command())
+	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
 
 	if err := root.Execute(); err != nil {

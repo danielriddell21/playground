@@ -1,0 +1,14 @@
+model
+  schema 1.1
+
+type user
+
+type team
+  relations
+    define member: [user]
+
+type document
+  relations
+    define owner: [user]
+    define editor: [user, team#member] or owner
+    define viewer: [user, team#member] or editor
