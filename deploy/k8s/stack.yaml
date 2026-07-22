@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:18
+          image: postgres:19beta2
           env:
             - name: POSTGRES_PASSWORD
               value: postgres
