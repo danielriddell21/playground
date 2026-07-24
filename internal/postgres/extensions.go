@@ -1,16 +1,13 @@
 package postgres
 
 func init() {
-	set.Add("extensions", "pg_trgm, hstore, ltree, citext, unaccent and pgcrypto", extensions)
+	set.Add("extensions", "pg_trgm fuzzy search, ltree trees, hstore, citext", extensions)
 }
 
 func extensions(s *Session) {
-	for _, ext := range []string{"pg_trgm", "hstore", "ltree", "citext", "unaccent", "pgcrypto", "intarray"} {
+	for _, ext := range []string{"pg_trgm", "hstore", "ltree", "citext", "unaccent", "pgcrypto"} {
 		s.Exec(`create extension if not exists "` + ext + `"`)
 	}
-
-	s.Note("installed extensions")
-	s.Show(`select extname, extversion from pg_extension order by extname`)
 
 	s.Note("pg_trgm fuzzy matching")
 	s.Exec(`drop table if exists names`)
@@ -44,8 +41,4 @@ func extensions(s *Session) {
 			crypt('password', gen_salt('bf', 6)) is not null as hashed,
 			encode(gen_random_bytes(8), 'hex') as random_bytes`)
 
-	s.Note("intarray")
-	s.Show(`select '{1,2,3}'::int[] & '{2,3,4}'::int[] as intersect,
-			'{1,2,3}'::int[] | '{3,4}'::int[] as union_,
-			sort_asc('{3,1,2}'::int[]) as sorted`)
 }
