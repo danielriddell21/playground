@@ -11,3 +11,24 @@ services:
     image: apache/kafka:latest
     ports:
       - "9092:9092"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  daprd:
+    image: daprio/daprd:latest
+    network_mode: host
+    depends_on:
+      - redis
+    volumes:
+      - ./deploy/dapr:/components:ro
+    command:
+      - ./daprd
+      - --app-id=playground
+      - --dapr-http-port=3500
+      - --dapr-grpc-port=50001
+      - --resources-path=/components
+      - --app-protocol=grpc
+      - --app-port=50002

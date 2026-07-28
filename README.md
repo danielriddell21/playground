@@ -20,6 +20,7 @@ Node ports are 30432 postgres, 30092 kafka, 30379 redis.
 ## Tools
 
 ```
+go run . dapr all          needs redis + daprd
 go run . graphql all       nothing needed
 go run . grpc all          nothing needed
 go run . kafka all         needs kafka
