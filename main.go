@@ -11,6 +11,7 @@ import (
 	grpcplay "playground/internal/grpcplay"
 	"playground/internal/kafka"
 	"playground/internal/melange"
+	"playground/internal/mix"
 	fga "playground/internal/openfga"
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
@@ -26,6 +27,7 @@ func main() {
 	root.AddCommand(graphql.Command())
 	root.AddCommand(grpcplay.Command())
 	root.AddCommand(kafka.Command())
+	root.AddCommand(mix.Command())
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(sqlcplay.Command())
 	root.AddCommand(fga.Command())
