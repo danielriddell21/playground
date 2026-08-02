@@ -24,6 +24,7 @@ go run . dapr all          needs redis + daprd
 go run . graphql all       nothing needed
 go run . grpc all          nothing needed
 go run . kafka all         needs kafka
+go run . mix all           two or more of the above together
 go run . postgres all      needs postgres
 go run . sqlc all          needs postgres + sqlc cli
 go run . openfga all       needs the openfga binary
@@ -31,3 +32,5 @@ go run . melange all       needs postgres + melange cli
 ```
 
 `go run . <tool> --help` lists the demos. `--dsn` overrides the connection.
+
+`mix graph` needs postgres 19 and skips itself on anything older.
