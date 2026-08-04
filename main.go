@@ -10,6 +10,7 @@ import (
 	"playground/internal/graphql"
 	grpcplay "playground/internal/grpcplay"
 	"playground/internal/kafka"
+	"playground/internal/lang"
 	"playground/internal/melange"
 	"playground/internal/mix"
 	fga "playground/internal/openfga"
@@ -27,6 +28,7 @@ func main() {
 	root.AddCommand(graphql.Command())
 	root.AddCommand(grpcplay.Command())
 	root.AddCommand(kafka.Command())
+	root.AddCommand(lang.Command())
 	root.AddCommand(mix.Command())
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(sqlcplay.Command())
