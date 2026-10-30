@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package bigdata;
+
+option go_package = "playground/internal/bigdata/pb";
+
+// every batch is columnar: one packed repeated field per column,
+// so a 5000 row batch is a handful of allocations, not 5000 messages
+
+message Empty {}
+
+message Summary {
+  int64 rows = 1;
+  int64 inserted = 2;
+  int64 updated = 3;
+}
+
+message Ack {
+  int64 seq = 1;
+  int64 rows = 2;
+}
+
+// rocket
+
+message PingBatch {
+  int64 seq = 1;
+  repeated int64 id = 2;
+  repeated int32 sensor = 3;
+  repeated int64 at = 4;
+  repeated double alt = 5;
+  repeated float temp = 6;
+}
+
+// ufo
+
+message SightingBatch {
+  int64 seq = 1;
+  repeated int64 id = 2;
+  repeated int64 cell = 3;
+  repeated int64 minute = 4;
+  repeated int32 shape = 5;
+}
+
+// heist
+
+message Bounds {
+  int64 pages = 1;
+}
+
+message ExportRequest {
+  enum Mode {
+    QUERY = 0;
+    CTID = 1;
+    COPY = 2;
+  }
+  Mode mode = 1;
+  int64 lo = 2;
+  int64 hi = 3;
+}
+
+message LogBatch {
+  repeated int64 id = 1;
+  repeated int32 badge = 2;
+  repeated int32 door = 3;
+  repeated int64 at = 4;
+}
+
+// wrapped
+
+message WrappedRequest {
+  enum Mode {
+    AGG = 0;
+    RANGES = 1;
+    VIEW = 2;
+  }
+  Mode mode = 1;
+}
+
+message WrappedBatch {
+  repeated int32 listener = 1;
+  repeated int32 artist = 2;
+  repeated int64 secs = 3;
+}
+
+// steps
+
+message StepBatch {
+  int32 part = 1; // -1 parent table, else the list partition to copy into
+  repeated int32 user_id = 2;
+  repeated int64 at = 3;
+  repeated int32 steps = 4;
+}
+
+message BoardRequest {
+  bool partitioned = 1;
+}
+
+message Board {
+  repeated int32 user_id = 1;
+  repeated int64 steps = 2;
+  int32 couch_user = 3;
+  int64 couch_steps = 4;
+}
+
+// coffee
+
+message OrderBatch {
+  repeated int64 id = 1;
+  repeated int32 person = 2;
+  repeated int32 drink = 3;
+  repeated int32 size = 4;
+  repeated int64 at = 5;
+}
+
+message PricedBatch {
+  repeated int64 id = 1;
+  repeated int64 cents = 2;
+  repeated int32 mg = 3;
+  repeated bool intervention = 4;
+}
+
+// fraud
+
+message SwipeBatch {
+  repeated int64 id = 1;
+  repeated int64 card = 2;
+  repeated int64 at = 3;
+  repeated double lat = 4;
+  repeated double lon = 5;
+  repeated int64 cents = 6;
+}
+
+message Flags {
+  repeated int64 id = 1;
+}
+
+service Bigdata {
+  rpc IngestPings(stream PingBatch) returns (Summary);
+  rpc IngestPingsAck(stream PingBatch) returns (stream Ack);
+
+  rpc LoadSightingsUpsert(stream SightingBatch) returns (Summary);
+  rpc LoadSightingsMerge(stream SightingBatch) returns (Summary);
+  rpc TrickleSightings(stream SightingBatch) returns (stream Ack);
+
+  rpc VaultBounds(Empty) returns (Bounds);
+  rpc ExportVault(ExportRequest) returns (stream LogBatch);
+
+  rpc Wrapped(WrappedRequest) returns (stream WrappedBatch);
+
+  rpc IngestSteps(stream StepBatch) returns (Summary);
+  rpc Leaderboard(BoardRequest) returns (Board);
+  rpc Track(stream StepBatch) returns (stream Board);
+
+  rpc Brew(stream OrderBatch) returns (stream PricedBatch);
+  rpc LoadOrders(stream OrderBatch) returns (Summary);
+  rpc ExportPriced(Empty) returns (stream PricedBatch);
+  rpc BrewBatch(OrderBatch) returns (PricedBatch);
+
+  rpc Screen(stream SwipeBatch) returns (stream Flags);
+  rpc LoadSwipes(stream SwipeBatch) returns (Summary);
+  rpc SweepFlags(Empty) returns (stream Flags);
+  rpc ScreenStaged(stream SwipeBatch) returns (stream Flags);
+}

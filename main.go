@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"playground/internal/bigdata"
 	"playground/internal/dapr"
 	"playground/internal/graphql"
 	grpcplay "playground/internal/grpcplay"
@@ -24,6 +25,7 @@ func main() {
 		Use:   "playground",
 		Short: "playgrounds for tools worth messing around with",
 	}
+	root.AddCommand(bigdata.Command())
 	root.AddCommand(dapr.Command())
 	root.AddCommand(graphql.Command())
 	root.AddCommand(grpcplay.Command())
