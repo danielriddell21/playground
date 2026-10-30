@@ -1242,7 +1242,8 @@ const file_internal_bigdata_pb_bigdata_proto_rawDesc = "" +
 	"\x03lon\x18\x05 \x03(\x01R\x03lon\x12\x14\n" +
 	"\x05cents\x18\x06 \x03(\x03R\x05cents\"\x17\n" +
 	"\x05Flags\x12\x0e\n" +
-	"\x02id\x18\x01 \x03(\x03R\x02id2\xb3\b\n" +
+	"\x02id\x18\x01 \x03(\x03R\x02id2\xcf\n" +
+	"\n" +
 	"\aBigdata\x125\n" +
 	"\vIngestPings\x12\x12.bigdata.PingBatch\x1a\x10.bigdata.Summary(\x01\x126\n" +
 	"\x0eIngestPingsAck\x12\x12.bigdata.PingBatch\x1a\f.bigdata.Ack(\x010\x01\x12A\n" +
@@ -1265,7 +1266,12 @@ const file_internal_bigdata_pb_bigdata_proto_rawDesc = "" +
 	"LoadSwipes\x12\x13.bigdata.SwipeBatch\x1a\x10.bigdata.Summary(\x01\x12.\n" +
 	"\n" +
 	"SweepFlags\x12\x0e.bigdata.Empty\x1a\x0e.bigdata.Flags0\x01\x127\n" +
-	"\fScreenStaged\x12\x13.bigdata.SwipeBatch\x1a\x0e.bigdata.Flags(\x010\x01B Z\x1eplayground/internal/bigdata/pbb\x06proto3"
+	"\fScreenStaged\x12\x13.bigdata.SwipeBatch\x1a\x0e.bigdata.Flags(\x010\x01\x12;\n" +
+	"\x13IngestPingsBuffered\x12\x12.bigdata.PingBatch\x1a\f.bigdata.Ack(\x010\x01\x12)\n" +
+	"\x05Drain\x12\x0e.bigdata.Empty\x1a\x10.bigdata.Summary\x12B\n" +
+	"\x16TrickleSightingsCached\x12\x16.bigdata.SightingBatch\x1a\f.bigdata.Ack(\x010\x01\x125\n" +
+	"\vTrackCached\x12\x12.bigdata.StepBatch\x1a\x0e.bigdata.Board(\x010\x01\x127\n" +
+	"\fScreenCached\x12\x13.bigdata.SwipeBatch\x1a\x0e.bigdata.Flags(\x010\x01B Z\x1eplayground/internal/bigdata/pbb\x06proto3"
 
 var (
 	file_internal_bigdata_pb_bigdata_proto_rawDescOnce sync.Once
@@ -1324,27 +1330,37 @@ var file_internal_bigdata_pb_bigdata_proto_depIdxs = []int32{
 	17, // 18: bigdata.Bigdata.LoadSwipes:input_type -> bigdata.SwipeBatch
 	2,  // 19: bigdata.Bigdata.SweepFlags:input_type -> bigdata.Empty
 	17, // 20: bigdata.Bigdata.ScreenStaged:input_type -> bigdata.SwipeBatch
-	3,  // 21: bigdata.Bigdata.IngestPings:output_type -> bigdata.Summary
-	4,  // 22: bigdata.Bigdata.IngestPingsAck:output_type -> bigdata.Ack
-	3,  // 23: bigdata.Bigdata.LoadSightingsUpsert:output_type -> bigdata.Summary
-	3,  // 24: bigdata.Bigdata.LoadSightingsMerge:output_type -> bigdata.Summary
-	4,  // 25: bigdata.Bigdata.TrickleSightings:output_type -> bigdata.Ack
-	7,  // 26: bigdata.Bigdata.VaultBounds:output_type -> bigdata.Bounds
-	9,  // 27: bigdata.Bigdata.ExportVault:output_type -> bigdata.LogBatch
-	11, // 28: bigdata.Bigdata.Wrapped:output_type -> bigdata.WrappedBatch
-	3,  // 29: bigdata.Bigdata.IngestSteps:output_type -> bigdata.Summary
-	14, // 30: bigdata.Bigdata.Leaderboard:output_type -> bigdata.Board
-	14, // 31: bigdata.Bigdata.Track:output_type -> bigdata.Board
-	16, // 32: bigdata.Bigdata.Brew:output_type -> bigdata.PricedBatch
-	3,  // 33: bigdata.Bigdata.LoadOrders:output_type -> bigdata.Summary
-	16, // 34: bigdata.Bigdata.ExportPriced:output_type -> bigdata.PricedBatch
-	16, // 35: bigdata.Bigdata.BrewBatch:output_type -> bigdata.PricedBatch
-	18, // 36: bigdata.Bigdata.Screen:output_type -> bigdata.Flags
-	3,  // 37: bigdata.Bigdata.LoadSwipes:output_type -> bigdata.Summary
-	18, // 38: bigdata.Bigdata.SweepFlags:output_type -> bigdata.Flags
-	18, // 39: bigdata.Bigdata.ScreenStaged:output_type -> bigdata.Flags
-	21, // [21:40] is the sub-list for method output_type
-	2,  // [2:21] is the sub-list for method input_type
+	5,  // 21: bigdata.Bigdata.IngestPingsBuffered:input_type -> bigdata.PingBatch
+	2,  // 22: bigdata.Bigdata.Drain:input_type -> bigdata.Empty
+	6,  // 23: bigdata.Bigdata.TrickleSightingsCached:input_type -> bigdata.SightingBatch
+	12, // 24: bigdata.Bigdata.TrackCached:input_type -> bigdata.StepBatch
+	17, // 25: bigdata.Bigdata.ScreenCached:input_type -> bigdata.SwipeBatch
+	3,  // 26: bigdata.Bigdata.IngestPings:output_type -> bigdata.Summary
+	4,  // 27: bigdata.Bigdata.IngestPingsAck:output_type -> bigdata.Ack
+	3,  // 28: bigdata.Bigdata.LoadSightingsUpsert:output_type -> bigdata.Summary
+	3,  // 29: bigdata.Bigdata.LoadSightingsMerge:output_type -> bigdata.Summary
+	4,  // 30: bigdata.Bigdata.TrickleSightings:output_type -> bigdata.Ack
+	7,  // 31: bigdata.Bigdata.VaultBounds:output_type -> bigdata.Bounds
+	9,  // 32: bigdata.Bigdata.ExportVault:output_type -> bigdata.LogBatch
+	11, // 33: bigdata.Bigdata.Wrapped:output_type -> bigdata.WrappedBatch
+	3,  // 34: bigdata.Bigdata.IngestSteps:output_type -> bigdata.Summary
+	14, // 35: bigdata.Bigdata.Leaderboard:output_type -> bigdata.Board
+	14, // 36: bigdata.Bigdata.Track:output_type -> bigdata.Board
+	16, // 37: bigdata.Bigdata.Brew:output_type -> bigdata.PricedBatch
+	3,  // 38: bigdata.Bigdata.LoadOrders:output_type -> bigdata.Summary
+	16, // 39: bigdata.Bigdata.ExportPriced:output_type -> bigdata.PricedBatch
+	16, // 40: bigdata.Bigdata.BrewBatch:output_type -> bigdata.PricedBatch
+	18, // 41: bigdata.Bigdata.Screen:output_type -> bigdata.Flags
+	3,  // 42: bigdata.Bigdata.LoadSwipes:output_type -> bigdata.Summary
+	18, // 43: bigdata.Bigdata.SweepFlags:output_type -> bigdata.Flags
+	18, // 44: bigdata.Bigdata.ScreenStaged:output_type -> bigdata.Flags
+	4,  // 45: bigdata.Bigdata.IngestPingsBuffered:output_type -> bigdata.Ack
+	3,  // 46: bigdata.Bigdata.Drain:output_type -> bigdata.Summary
+	4,  // 47: bigdata.Bigdata.TrickleSightingsCached:output_type -> bigdata.Ack
+	14, // 48: bigdata.Bigdata.TrackCached:output_type -> bigdata.Board
+	18, // 49: bigdata.Bigdata.ScreenCached:output_type -> bigdata.Flags
+	26, // [26:50] is the sub-list for method output_type
+	2,  // [2:26] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name

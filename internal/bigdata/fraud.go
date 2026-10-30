@@ -1,8 +1,12 @@
 package bigdata
 
 import (
+	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,6 +41,8 @@ func fillSwipes(b *pb.SwipeBatch, lo, hi int) {
 		b.Cents = append(b.Cents, int64(pick(i, 9, 20000)))
 	}
 }
+
+func swipeLen(b *pb.SwipeBatch) int { return len(b.Id) }
 
 func swipeRow(b *pb.SwipeBatch, i int, v []any) {
 	v[0], v[1], v[2], v[3], v[4], v[5] = b.Id[i], b.Card[i], fromMicros(b.At[i]), b.Lat[i], b.Lon[i], b.Cents[i]
@@ -128,7 +134,7 @@ func (s *server) Screen(stream pb.Bigdata_ScreenServer) error {
 
 func (s *server) LoadSwipes(stream pb.Bigdata_LoadSwipesServer) error {
 	n, err := s.pool.CopyFrom(stream.Context(), pgx.Identifier{"bigdata_swipe"}, swipeCols,
-		pgx.CopyFromFunc(fromStream(len(swipeCols), stream.Recv, func(b *pb.SwipeBatch) int { return len(b.Id) }, swipeRow)))
+		pgx.CopyFromFunc(fromStream(len(swipeCols), stream.Recv, swipeLen, swipeRow)))
 	if err != nil {
 		return err
 	}
@@ -148,32 +154,13 @@ func (s *server) SweepFlags(_ *pb.Empty, stream pb.Bigdata_SweepFlagsServer) err
 // ends sweep every partition at once. the lanes are bounded, so a slow
 // copy backs up into grpc flow control instead of into memory
 func (s *server) ScreenStaged(stream pb.Bigdata_ScreenStagedServer) error {
-	g, ctx := errgroup.WithContext(stream.Context())
-	lanes := make([]chan *pb.SwipeBatch, fraudParts)
-	for p := range fraudParts {
-		lanes[p] = make(chan *pb.SwipeBatch, 16)
-		g.Go(func() error {
-			_, err := s.pool.CopyFrom(ctx, pgx.Identifier{fmt.Sprintf("bigdata_swipe_part_%d", p)}, swipeCols,
-				pgx.CopyFromFunc(fromStream(len(swipeCols), func() (*pb.SwipeBatch, error) {
-					select {
-					case b, ok := <-lanes[p]:
-						if !ok {
-							return nil, io.EOF
-						}
-						return b, nil
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				}, func(b *pb.SwipeBatch) int { return len(b.Id) }, swipeRow)))
-			return err
-		})
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	lanes := make([]*lane[*pb.SwipeBatch], fraudParts)
+	for p := range lanes {
+		lanes[p] = copyLane(ctx, s.pool, fmt.Sprintf("bigdata_swipe_part_%d", p), swipeCols, swipeLen, swipeRow)
 	}
-	g.Go(func() error {
-		defer func() {
-			for _, l := range lanes {
-				close(l)
-			}
-		}()
+	recvErr := func() error {
 		for {
 			b, err := stream.Recv()
 			if err == io.EOF {
@@ -196,20 +183,26 @@ func (s *server) ScreenStaged(stream pb.Bigdata_ScreenStagedServer) error {
 				if part == nil {
 					continue
 				}
-				select {
-				case lanes[p] <- part:
-				case <-ctx.Done():
-					return ctx.Err()
+				if err := lanes[p].send(ctx, part); err != nil {
+					return err
 				}
 			}
 		}
-	})
-	if err := g.Wait(); err != nil {
-		return err
+	}()
+	if recvErr != nil {
+		cancel()
+	}
+	for _, l := range lanes {
+		if err := l.close(); err != nil && recvErr == nil {
+			recvErr = err
+		}
+	}
+	if recvErr != nil {
+		return recvErr
 	}
 
 	var mu sync.Mutex
-	g, ctx = errgroup.WithContext(stream.Context())
+	g, ctx := errgroup.WithContext(stream.Context())
 	for p := range fraudParts {
 		g.Go(func() error {
 			rows, err := s.pool.Query(ctx, sweepSQL(fmt.Sprintf("bigdata_swipe_part_%d", p)))
@@ -220,6 +213,96 @@ func (s *server) ScreenStaged(stream pb.Bigdata_ScreenStagedServer) error {
 		})
 	}
 	return g.Wait()
+}
+
+// ScreenCached keeps each card's last swipe in one redis hash, 24 bytes a
+// card. a batch is one HMGET for its cards, the same haversine in go, and
+// one HSET of where every card ended up; the swipes go to postgres down a
+// COPY lane and postgres is never asked about history
+func (s *server) ScreenCached(stream pb.Bigdata_ScreenCachedServer) error {
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	l := copyLane(ctx, s.pool, "bigdata_swipe", swipeCols, swipeLen, swipeRow)
+	err := func() error {
+		type spot struct {
+			at       int64
+			lat, lon float64
+		}
+		last := map[int64]spot{}
+		for {
+			b, err := stream.Recv()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			clear(last)
+			var fields []string
+			for _, card := range b.Card {
+				if _, ok := last[card]; !ok {
+					last[card] = spot{at: -1}
+					fields = append(fields, strconv.FormatInt(card, 10))
+				}
+			}
+			known, err := s.rdb.HMGet(ctx, keyPrefix+"card", fields...).Result()
+			if err != nil {
+				return err
+			}
+			for i, v := range known {
+				if v, ok := v.(string); ok && len(v) == 24 {
+					card, _ := strconv.ParseInt(fields[i], 10, 64)
+					last[card] = spot{
+						at:  int64(binary.LittleEndian.Uint64([]byte(v[0:]))),
+						lat: math.Float64frombits(binary.LittleEndian.Uint64([]byte(v[8:]))),
+						lon: math.Float64frombits(binary.LittleEndian.Uint64([]byte(v[16:]))),
+					}
+				}
+			}
+			out := &pb.Flags{}
+			for i, card := range b.Card {
+				cur := spot{b.At[i], b.Lat[i], b.Lon[i]}
+				if prev := last[card]; prev.at >= 0 && impossible(prev.lat, prev.lon, prev.at, cur.lat, cur.lon, cur.at) {
+					out.Id = append(out.Id, b.Id[i])
+				}
+				last[card] = cur
+			}
+			pairs := make([]any, 0, len(last)*2)
+			for card, sp := range last {
+				var v [24]byte
+				binary.LittleEndian.PutUint64(v[0:], uint64(sp.at))
+				binary.LittleEndian.PutUint64(v[8:], math.Float64bits(sp.lat))
+				binary.LittleEndian.PutUint64(v[16:], math.Float64bits(sp.lon))
+				pairs = append(pairs, strconv.FormatInt(card, 10), v[:])
+			}
+			if err := s.rdb.HSet(ctx, keyPrefix+"card", pairs...).Err(); err != nil {
+				return err
+			}
+			if err := l.send(ctx, b); err != nil {
+				return err
+			}
+			if len(out.Id) > 0 {
+				if err := stream.Send(out); err != nil {
+					return err
+				}
+			}
+		}
+	}()
+	if err != nil {
+		cancel()
+	}
+	if cerr := l.close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// impossible is tooFast in go, operation for operation
+func impossible(plat, plon float64, pat int64, lat, lon float64, at int64) bool {
+	rad := math.Pi / 180
+	a := math.Pow(math.Sin(rad*(lat-plat)/2), 2) + math.Cos(rad*plat)*math.Cos(rad*lat)*math.Pow(math.Sin(rad*(lon-plon)/2), 2)
+	km := 2 * 6371 * math.Asin(min(1, math.Sqrt(a)))
+	return km/max(float64(at-pat)/1e6, 1)*3600 > 900
 }
 
 type flagged struct {
@@ -279,8 +362,7 @@ func fraud(s *Session) {
 		return f.answer(), nil
 	}
 
-	s.race(
-		func() error { return s.execAll(`truncate bigdata_swipe, bigdata_card_last, bigdata_swipe_part`) },
+	approaches := []approach{
 		approach{
 			name: "card state",
 			grpc: "bidi, flags back per batch",
@@ -321,10 +403,28 @@ func fraud(s *Session) {
 				return bidi(func() (pb.Bigdata_ScreenClient, error) { return s.client.ScreenStaged(s.ctx) })
 			},
 		},
-	)
+	}
+	if s.withRedis() {
+		approaches = append(approaches, approach{
+			name: "redis state",
+			grpc: "bidi, flags back per batch",
+			pg:   "COPY lane; card state in a redis hash",
+			pick: "real time at bulk speed, and you can run redis with persistence",
+			run: func() (string, error) {
+				return bidi(func() (pb.Bigdata_ScreenClient, error) { return s.client.ScreenCached(s.ctx) })
+			},
+		})
+	}
+	s.race(func() error {
+		if err := s.resetRedis(); err != nil {
+			return err
+		}
+		return s.execAll(`truncate bigdata_swipe, bigdata_card_last, bigdata_swipe_part`)
+	}, approaches...)
 
 	s.Note("\nthe most well travelled card")
-	s.Show(`with x as (` + sweepSQL("bigdata_swipe_part") + `)
+	s.Show(`with swipes as (select * from bigdata_swipe union all select * from bigdata_swipe_part),
+		x as (` + sweepSQL("swipes") + `)
 		select card, count(*) as impossible_trips, (sum(cents) / 100.0)::numeric(10, 2) as spent
-		from bigdata_swipe_part where id in (select id from x) group by 1 order by 2 desc, 1 limit 3`)
+		from swipes where id in (select id from x) group by 1 order by 2 desc, 1 limit 3`)
 }

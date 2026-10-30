@@ -1,17 +1,27 @@
 package bigdata
 
 import (
+	"context"
 	"io"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"playground/internal/bigdata/pb"
 )
 
-// server is the grpc service, every handler is backed by postgres
+// server is the grpc service, every handler is backed by postgres and,
+// with --redis, some by redis too
 type server struct {
 	pb.UnimplementedBigdataServer
 	pool *pgxpool.Pool
+	rdb  *redis.Client
+
+	// bg outlives any one call; the ping copiers run on it
+	bg        context.Context
+	copiers   sync.Once
+	copierErr chan error
 }
 
 // fromStream turns a stream of columnar batches into the row source COPY

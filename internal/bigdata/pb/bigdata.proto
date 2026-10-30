@@ -160,4 +160,11 @@ service Bigdata {
   rpc LoadSwipes(stream SwipeBatch) returns (Summary);
   rpc SweepFlags(Empty) returns (stream Flags);
   rpc ScreenStaged(stream SwipeBatch) returns (stream Flags);
+
+  // only served with --redis
+  rpc IngestPingsBuffered(stream PingBatch) returns (stream Ack);
+  rpc Drain(Empty) returns (Summary);
+  rpc TrickleSightingsCached(stream SightingBatch) returns (stream Ack);
+  rpc TrackCached(stream StepBatch) returns (stream Board);
+  rpc ScreenCached(stream SwipeBatch) returns (stream Flags);
 }

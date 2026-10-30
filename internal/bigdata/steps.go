@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"playground/internal/bigdata/pb"
 )
@@ -24,6 +27,14 @@ func stepUsers() int { return max(rows/100, 10) }
 
 func stepRow(i int) (user, steps int32, at int64) {
 	return int32(1 + pick(i, 1, stepUsers())), int32(pick(i, 2, 3000)), micros(epoch.Add(time.Duration(i) * time.Second))
+}
+
+var stepCols = []string{"user_id", "at", "steps"}
+
+func stepLen(b *pb.StepBatch) int { return len(b.UserId) }
+
+func stepCopyRow(b *pb.StepBatch, i int, v []any) {
+	v[0], v[1], v[2] = b.UserId[i], fromMicros(b.At[i]), b.Steps[i]
 }
 
 func fillSteps(b *pb.StepBatch, lo, hi int) {
@@ -89,10 +100,8 @@ func (s *server) IngestSteps(stream pb.Bigdata_IngestStepsServer) error {
 		}
 		return stream.Recv()
 	}
-	n, err := s.pool.CopyFrom(stream.Context(), pgx.Identifier{table}, []string{"user_id", "at", "steps"},
-		pgx.CopyFromFunc(fromStream(3, recv, func(b *pb.StepBatch) int { return len(b.UserId) }, func(b *pb.StepBatch, i int, v []any) {
-			v[0], v[1], v[2] = b.UserId[i], fromMicros(b.At[i]), b.Steps[i]
-		})))
+	n, err := s.pool.CopyFrom(stream.Context(), pgx.Identifier{table}, stepCols,
+		pgx.CopyFromFunc(fromStream(len(stepCols), recv, stepLen, stepCopyRow)))
 	if err != nil {
 		return err
 	}
@@ -183,6 +192,106 @@ func (s *server) Track(stream pb.Bigdata_TrackServer) error {
 	}
 }
 
+// TrackCached is Track with the totals in a redis sorted set: one pipelined
+// ZINCRBY per user per batch, and the board is two short range reads.
+// raw pings still reach postgres, down a COPY lane
+func (s *server) TrackCached(stream pb.Bigdata_TrackCachedServer) error {
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	l := copyLane(ctx, s.pool, "bigdata_step", stepCols, stepLen, stepCopyRow)
+	err := func() error {
+		sums := map[int32]int64{}
+		for n := 1; ; n++ {
+			b, err := stream.Recv()
+			if err == io.EOF {
+				board, err := s.redisBoard(ctx)
+				if err != nil {
+					return err
+				}
+				return stream.Send(board)
+			}
+			if err != nil {
+				return err
+			}
+			clear(sums)
+			for i, u := range b.UserId {
+				sums[u] += int64(b.Steps[i])
+			}
+			pipe := s.rdb.Pipeline()
+			for u, v := range sums {
+				pipe.ZIncrBy(ctx, keyPrefix+"steps", float64(v), strconv.Itoa(int(u)))
+			}
+			if _, err := pipe.Exec(ctx); err != nil {
+				return err
+			}
+			if err := l.send(ctx, b); err != nil {
+				return err
+			}
+			if n%100 == 0 {
+				board, err := s.redisBoard(ctx)
+				if err != nil {
+					return err
+				}
+				if err := stream.Send(board); err != nil {
+					return err
+				}
+			}
+		}
+	}()
+	if err != nil {
+		cancel()
+	}
+	if cerr := l.close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// redisBoard reads both ends of the sorted set. redis breaks score ties by
+// member as text, postgres here by user_id as a number, so everything tied
+// with the boundary score is fetched and the tie broken in go
+func (s *server) redisBoard(ctx context.Context) (*pb.Board, error) {
+	key := keyPrefix + "steps"
+	top, err := s.rdb.ZRevRangeWithScores(ctx, key, 0, 9).Result()
+	if err != nil || len(top) == 0 {
+		return &pb.Board{}, err
+	}
+	score := func(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+	type entry struct {
+		user  int32
+		steps int64
+	}
+	entries := func(zs []redis.Z) []entry {
+		out := make([]entry, len(zs))
+		for i, z := range zs {
+			u, _ := strconv.Atoi(z.Member.(string))
+			out[i] = entry{int32(u), int64(z.Score)}
+		}
+		return out
+	}
+	high, err := s.rdb.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{Min: score(top[len(top)-1].Score), Max: "+inf"}).Result()
+	if err != nil {
+		return nil, err
+	}
+	low, err := s.rdb.ZRangeWithScores(ctx, key, 0, 0).Result()
+	if err != nil {
+		return nil, err
+	}
+	floor, err := s.rdb.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{Min: score(low[0].Score), Max: score(low[0].Score)}).Result()
+	if err != nil {
+		return nil, err
+	}
+	best := entries(high)
+	slices.SortFunc(best, func(a, b entry) int { return cmp.Or(cmp.Compare(b.steps, a.steps), cmp.Compare(a.user, b.user)) })
+	out := &pb.Board{}
+	for _, e := range best[:min(10, len(best))] {
+		out.UserId, out.Steps = append(out.UserId, e.user), append(out.Steps, e.steps)
+	}
+	couch := slices.MinFunc(entries(floor), func(a, b entry) int { return cmp.Compare(a.user, b.user) })
+	out.CouchUser, out.CouchSteps = couch.user, couch.steps
+	return out, nil
+}
+
 // boardString fingerprints the whole top 10 but only spells out the ends
 func boardString(b *pb.Board) string {
 	if len(b.UserId) == 0 {
@@ -205,8 +314,39 @@ func steps(s *Session) {
 		s.Exec(fmt.Sprintf(`create table bigdata_step_part_%d partition of bigdata_step_part for values in (%d)`, p, p))
 	}
 
-	s.race(
-		func() error { return s.execAll(`truncate bigdata_step, bigdata_step_total, bigdata_step_part`) },
+	track := func(open func(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[pb.StepBatch, pb.Board], error)) (string, error) {
+		stream, err := open(s.ctx)
+		if err != nil {
+			return "", err
+		}
+		var last *pb.Board
+		done := make(chan error, 1)
+		go func() {
+			for {
+				b, err := stream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						err = nil
+					}
+					done <- err
+					return
+				}
+				last = b
+			}
+		}()
+		for b := range batches(0, rows, fillSteps) {
+			if err := stream.Send(b); err != nil {
+				return "", err
+			}
+		}
+		stream.CloseSend()
+		if err := <-done; err != nil {
+			return "", err
+		}
+		return boardString(last), nil
+	}
+
+	approaches := []approach{
 		approach{
 			name: "copy, group",
 			grpc: "client stream + unary",
@@ -232,37 +372,7 @@ func steps(s *Session) {
 			grpc: "bidi, live boards back",
 			pg:   "unnest upsert of per batch sums",
 			pick: "the board is on a screen all day and nobody needs the raw pings",
-			run: func() (string, error) {
-				stream, err := s.client.Track(s.ctx)
-				if err != nil {
-					return "", err
-				}
-				var last *pb.Board
-				done := make(chan error, 1)
-				go func() {
-					for {
-						b, err := stream.Recv()
-						if err != nil {
-							if err == io.EOF {
-								err = nil
-							}
-							done <- err
-							return
-						}
-						last = b
-					}
-				}()
-				for b := range batches(0, rows, fillSteps) {
-					if err := stream.Send(b); err != nil {
-						return "", err
-					}
-				}
-				stream.CloseSend()
-				if err := <-done; err != nil {
-					return "", err
-				}
-				return boardString(last), nil
-			},
+			run:  func() (string, error) { return track(s.client.Track) },
 		},
 		approach{
 			name: "partitions",
@@ -332,9 +442,25 @@ func steps(s *Session) {
 				return boardString(b), nil
 			},
 		},
-	)
+	}
+	if s.withRedis() {
+		approaches = append(approaches, approach{
+			name: "redis zset",
+			grpc: "bidi, live boards back",
+			pg:   "COPY lane; totals in a redis sorted set",
+			pick: "a live board at bulk speed, raw pings kept in postgres",
+			run:  func() (string, error) { return track(s.client.TrackCached) },
+		})
+	}
+	s.race(func() error {
+		if err := s.resetRedis(); err != nil {
+			return err
+		}
+		return s.execAll(`truncate bigdata_step, bigdata_step_total, bigdata_step_part`)
+	}, approaches...)
 
 	s.Note("\nthe podium")
 	s.Show(`select user_id, sum(steps) as steps, round(sum(steps) * 0.0008, 1) as km
-		from bigdata_step_part group by 1 order by 2 desc, 1 limit 3`)
+		from (select * from bigdata_step union all select * from bigdata_step_part) x
+		group by 1 order by 2 desc, 1 limit 3`)
 }

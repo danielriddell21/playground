@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -28,6 +29,8 @@ var (
 type Session struct {
 	ctx    context.Context
 	pool   *pgxpool.Pool
+	rdb    *redis.Client
+	stop   func()
 	srv    *grpc.Server
 	conn   *grpc.ClientConn
 	client pb.BigdataClient
@@ -42,6 +45,12 @@ func (s *Session) Close() {
 	}
 	if s.srv != nil {
 		s.srv.Stop()
+	}
+	if s.stop != nil {
+		s.stop()
+	}
+	if s.rdb != nil {
+		s.rdb.Close()
 	}
 	if s.pool != nil {
 		s.pool.Close()
@@ -132,7 +141,14 @@ func connect(ctx context.Context, dsn string) (*Session, error) {
 		grpc.InitialWindowSize(1<<20),
 		grpc.InitialConnWindowSize(16<<20),
 	)
-	pb.RegisterBigdataServer(srv, &server{pool: pool})
+	rdb, err := openRedis(ctx)
+	if err != nil {
+		srv.Stop()
+		pool.Close()
+		return nil, err
+	}
+	bg, stop := context.WithCancel(context.Background())
+	pb.RegisterBigdataServer(srv, &server{pool: pool, rdb: rdb, bg: bg})
 	go srv.Serve(lis)
 
 	conn, err := grpc.NewClient("passthrough:///bufnet",
@@ -146,11 +162,12 @@ func connect(ctx context.Context, dsn string) (*Session, error) {
 	)
 	if err != nil {
 		srv.Stop()
+		stop()
 		pool.Close()
 		return nil, err
 	}
 
-	return &Session{ctx: ctx, pool: pool, srv: srv, conn: conn, client: pb.NewBigdataClient(conn)}, nil
+	return &Session{ctx: ctx, pool: pool, rdb: rdb, stop: stop, srv: srv, conn: conn, client: pb.NewBigdataClient(conn)}, nil
 }
 
 func Command() *cobra.Command {
@@ -162,6 +179,7 @@ func Command() *cobra.Command {
 	})
 	cmd.PersistentFlags().IntVar(&batchSize, "batch", batchSize, "rows per grpc message")
 	cmd.PersistentFlags().IntVar(&runs, "runs", runs, "runs per approach, best is reported")
+	cmd.PersistentFlags().StringVar(&redisAddr, "redis", "", "redis address, adds a redis approach where it helps (default $REDIS_URL)")
 	return cmd
 }
 

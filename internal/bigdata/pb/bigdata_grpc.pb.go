@@ -19,25 +19,30 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Bigdata_IngestPings_FullMethodName         = "/bigdata.Bigdata/IngestPings"
-	Bigdata_IngestPingsAck_FullMethodName      = "/bigdata.Bigdata/IngestPingsAck"
-	Bigdata_LoadSightingsUpsert_FullMethodName = "/bigdata.Bigdata/LoadSightingsUpsert"
-	Bigdata_LoadSightingsMerge_FullMethodName  = "/bigdata.Bigdata/LoadSightingsMerge"
-	Bigdata_TrickleSightings_FullMethodName    = "/bigdata.Bigdata/TrickleSightings"
-	Bigdata_VaultBounds_FullMethodName         = "/bigdata.Bigdata/VaultBounds"
-	Bigdata_ExportVault_FullMethodName         = "/bigdata.Bigdata/ExportVault"
-	Bigdata_Wrapped_FullMethodName             = "/bigdata.Bigdata/Wrapped"
-	Bigdata_IngestSteps_FullMethodName         = "/bigdata.Bigdata/IngestSteps"
-	Bigdata_Leaderboard_FullMethodName         = "/bigdata.Bigdata/Leaderboard"
-	Bigdata_Track_FullMethodName               = "/bigdata.Bigdata/Track"
-	Bigdata_Brew_FullMethodName                = "/bigdata.Bigdata/Brew"
-	Bigdata_LoadOrders_FullMethodName          = "/bigdata.Bigdata/LoadOrders"
-	Bigdata_ExportPriced_FullMethodName        = "/bigdata.Bigdata/ExportPriced"
-	Bigdata_BrewBatch_FullMethodName           = "/bigdata.Bigdata/BrewBatch"
-	Bigdata_Screen_FullMethodName              = "/bigdata.Bigdata/Screen"
-	Bigdata_LoadSwipes_FullMethodName          = "/bigdata.Bigdata/LoadSwipes"
-	Bigdata_SweepFlags_FullMethodName          = "/bigdata.Bigdata/SweepFlags"
-	Bigdata_ScreenStaged_FullMethodName        = "/bigdata.Bigdata/ScreenStaged"
+	Bigdata_IngestPings_FullMethodName            = "/bigdata.Bigdata/IngestPings"
+	Bigdata_IngestPingsAck_FullMethodName         = "/bigdata.Bigdata/IngestPingsAck"
+	Bigdata_LoadSightingsUpsert_FullMethodName    = "/bigdata.Bigdata/LoadSightingsUpsert"
+	Bigdata_LoadSightingsMerge_FullMethodName     = "/bigdata.Bigdata/LoadSightingsMerge"
+	Bigdata_TrickleSightings_FullMethodName       = "/bigdata.Bigdata/TrickleSightings"
+	Bigdata_VaultBounds_FullMethodName            = "/bigdata.Bigdata/VaultBounds"
+	Bigdata_ExportVault_FullMethodName            = "/bigdata.Bigdata/ExportVault"
+	Bigdata_Wrapped_FullMethodName                = "/bigdata.Bigdata/Wrapped"
+	Bigdata_IngestSteps_FullMethodName            = "/bigdata.Bigdata/IngestSteps"
+	Bigdata_Leaderboard_FullMethodName            = "/bigdata.Bigdata/Leaderboard"
+	Bigdata_Track_FullMethodName                  = "/bigdata.Bigdata/Track"
+	Bigdata_Brew_FullMethodName                   = "/bigdata.Bigdata/Brew"
+	Bigdata_LoadOrders_FullMethodName             = "/bigdata.Bigdata/LoadOrders"
+	Bigdata_ExportPriced_FullMethodName           = "/bigdata.Bigdata/ExportPriced"
+	Bigdata_BrewBatch_FullMethodName              = "/bigdata.Bigdata/BrewBatch"
+	Bigdata_Screen_FullMethodName                 = "/bigdata.Bigdata/Screen"
+	Bigdata_LoadSwipes_FullMethodName             = "/bigdata.Bigdata/LoadSwipes"
+	Bigdata_SweepFlags_FullMethodName             = "/bigdata.Bigdata/SweepFlags"
+	Bigdata_ScreenStaged_FullMethodName           = "/bigdata.Bigdata/ScreenStaged"
+	Bigdata_IngestPingsBuffered_FullMethodName    = "/bigdata.Bigdata/IngestPingsBuffered"
+	Bigdata_Drain_FullMethodName                  = "/bigdata.Bigdata/Drain"
+	Bigdata_TrickleSightingsCached_FullMethodName = "/bigdata.Bigdata/TrickleSightingsCached"
+	Bigdata_TrackCached_FullMethodName            = "/bigdata.Bigdata/TrackCached"
+	Bigdata_ScreenCached_FullMethodName           = "/bigdata.Bigdata/ScreenCached"
 )
 
 // BigdataClient is the client API for Bigdata service.
@@ -63,6 +68,12 @@ type BigdataClient interface {
 	LoadSwipes(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[SwipeBatch, Summary], error)
 	SweepFlags(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Flags], error)
 	ScreenStaged(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SwipeBatch, Flags], error)
+	// only served with --redis
+	IngestPingsBuffered(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[PingBatch, Ack], error)
+	Drain(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Summary, error)
+	TrickleSightingsCached(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SightingBatch, Ack], error)
+	TrackCached(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StepBatch, Board], error)
+	ScreenCached(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SwipeBatch, Flags], error)
 }
 
 type bigdataClient struct {
@@ -335,6 +346,68 @@ func (c *bigdataClient) ScreenStaged(ctx context.Context, opts ...grpc.CallOptio
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Bigdata_ScreenStagedClient = grpc.BidiStreamingClient[SwipeBatch, Flags]
 
+func (c *bigdataClient) IngestPingsBuffered(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[PingBatch, Ack], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Bigdata_ServiceDesc.Streams[16], Bigdata_IngestPingsBuffered_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PingBatch, Ack]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_IngestPingsBufferedClient = grpc.BidiStreamingClient[PingBatch, Ack]
+
+func (c *bigdataClient) Drain(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Summary, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Summary)
+	err := c.cc.Invoke(ctx, Bigdata_Drain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *bigdataClient) TrickleSightingsCached(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SightingBatch, Ack], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Bigdata_ServiceDesc.Streams[17], Bigdata_TrickleSightingsCached_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SightingBatch, Ack]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_TrickleSightingsCachedClient = grpc.BidiStreamingClient[SightingBatch, Ack]
+
+func (c *bigdataClient) TrackCached(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StepBatch, Board], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Bigdata_ServiceDesc.Streams[18], Bigdata_TrackCached_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StepBatch, Board]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_TrackCachedClient = grpc.BidiStreamingClient[StepBatch, Board]
+
+func (c *bigdataClient) ScreenCached(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SwipeBatch, Flags], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Bigdata_ServiceDesc.Streams[19], Bigdata_ScreenCached_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SwipeBatch, Flags]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_ScreenCachedClient = grpc.BidiStreamingClient[SwipeBatch, Flags]
+
 // BigdataServer is the server API for Bigdata service.
 // All implementations must embed UnimplementedBigdataServer
 // for forward compatibility.
@@ -358,6 +431,12 @@ type BigdataServer interface {
 	LoadSwipes(grpc.ClientStreamingServer[SwipeBatch, Summary]) error
 	SweepFlags(*Empty, grpc.ServerStreamingServer[Flags]) error
 	ScreenStaged(grpc.BidiStreamingServer[SwipeBatch, Flags]) error
+	// only served with --redis
+	IngestPingsBuffered(grpc.BidiStreamingServer[PingBatch, Ack]) error
+	Drain(context.Context, *Empty) (*Summary, error)
+	TrickleSightingsCached(grpc.BidiStreamingServer[SightingBatch, Ack]) error
+	TrackCached(grpc.BidiStreamingServer[StepBatch, Board]) error
+	ScreenCached(grpc.BidiStreamingServer[SwipeBatch, Flags]) error
 	mustEmbedUnimplementedBigdataServer()
 }
 
@@ -424,6 +503,21 @@ func (UnimplementedBigdataServer) SweepFlags(*Empty, grpc.ServerStreamingServer[
 }
 func (UnimplementedBigdataServer) ScreenStaged(grpc.BidiStreamingServer[SwipeBatch, Flags]) error {
 	return status.Error(codes.Unimplemented, "method ScreenStaged not implemented")
+}
+func (UnimplementedBigdataServer) IngestPingsBuffered(grpc.BidiStreamingServer[PingBatch, Ack]) error {
+	return status.Error(codes.Unimplemented, "method IngestPingsBuffered not implemented")
+}
+func (UnimplementedBigdataServer) Drain(context.Context, *Empty) (*Summary, error) {
+	return nil, status.Error(codes.Unimplemented, "method Drain not implemented")
+}
+func (UnimplementedBigdataServer) TrickleSightingsCached(grpc.BidiStreamingServer[SightingBatch, Ack]) error {
+	return status.Error(codes.Unimplemented, "method TrickleSightingsCached not implemented")
+}
+func (UnimplementedBigdataServer) TrackCached(grpc.BidiStreamingServer[StepBatch, Board]) error {
+	return status.Error(codes.Unimplemented, "method TrackCached not implemented")
+}
+func (UnimplementedBigdataServer) ScreenCached(grpc.BidiStreamingServer[SwipeBatch, Flags]) error {
+	return status.Error(codes.Unimplemented, "method ScreenCached not implemented")
 }
 func (UnimplementedBigdataServer) mustEmbedUnimplementedBigdataServer() {}
 func (UnimplementedBigdataServer) testEmbeddedByValue()                 {}
@@ -628,6 +722,52 @@ func _Bigdata_ScreenStaged_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Bigdata_ScreenStagedServer = grpc.BidiStreamingServer[SwipeBatch, Flags]
 
+func _Bigdata_IngestPingsBuffered_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BigdataServer).IngestPingsBuffered(&grpc.GenericServerStream[PingBatch, Ack]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_IngestPingsBufferedServer = grpc.BidiStreamingServer[PingBatch, Ack]
+
+func _Bigdata_Drain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BigdataServer).Drain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Bigdata_Drain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BigdataServer).Drain(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Bigdata_TrickleSightingsCached_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BigdataServer).TrickleSightingsCached(&grpc.GenericServerStream[SightingBatch, Ack]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_TrickleSightingsCachedServer = grpc.BidiStreamingServer[SightingBatch, Ack]
+
+func _Bigdata_TrackCached_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BigdataServer).TrackCached(&grpc.GenericServerStream[StepBatch, Board]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_TrackCachedServer = grpc.BidiStreamingServer[StepBatch, Board]
+
+func _Bigdata_ScreenCached_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BigdataServer).ScreenCached(&grpc.GenericServerStream[SwipeBatch, Flags]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Bigdata_ScreenCachedServer = grpc.BidiStreamingServer[SwipeBatch, Flags]
+
 // Bigdata_ServiceDesc is the grpc.ServiceDesc for Bigdata service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -646,6 +786,10 @@ var Bigdata_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BrewBatch",
 			Handler:    _Bigdata_BrewBatch_Handler,
+		},
+		{
+			MethodName: "Drain",
+			Handler:    _Bigdata_Drain_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -732,6 +876,30 @@ var Bigdata_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ScreenStaged",
 			Handler:       _Bigdata_ScreenStaged_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "IngestPingsBuffered",
+			Handler:       _Bigdata_IngestPingsBuffered_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "TrickleSightingsCached",
+			Handler:       _Bigdata_TrickleSightingsCached_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "TrackCached",
+			Handler:       _Bigdata_TrackCached_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ScreenCached",
+			Handler:       _Bigdata_ScreenCached_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
