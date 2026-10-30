@@ -3,9 +3,11 @@ package bigdata
 import (
 	"context"
 	"io"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 
 	"playground/internal/bigdata/pb"
@@ -139,6 +141,62 @@ func (s *server) TrickleSightings(stream pb.Bigdata_TrickleSightingsServer) erro
 	}
 }
 
+// TrickleSightingsCached asks redis whether each sighting is new before
+// postgres sees it: one pipelined HSETNX per row, and only the winners go
+// down the COPY lane. keys are spread over 65536 small hashes, which redis
+// stores packed, about a third of the memory of a key per sighting. the
+// unique index stays as the backstop
+func (s *server) TrickleSightingsCached(stream pb.Bigdata_TrickleSightingsCachedServer) error {
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	l := copyLane(ctx, s.pool, "bigdata_sighting", []string{"id", "cell", "minute", "shape"},
+		func(b *pb.SightingBatch) int { return len(b.Id) }, sightingRow)
+	err := func() error {
+		var buf []byte
+		for {
+			b, err := stream.Recv()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			pipe := s.rdb.Pipeline()
+			seen := make([]*redis.BoolCmd, len(b.Id))
+			for i := range b.Id {
+				bucket := keyPrefix + "seen:" + strconv.FormatUint(hash(int(b.Cell[i]), int(b.Minute[i]))%65536, 10)
+				buf = strconv.AppendInt(buf[:0], b.Cell[i], 36)
+				buf = append(buf, ':')
+				buf = strconv.AppendInt(buf, b.Minute[i]/60_000_000, 36)
+				seen[i] = pipe.HSetNX(ctx, bucket, string(buf), 1)
+			}
+			if _, err := pipe.Exec(ctx); err != nil {
+				return err
+			}
+			fresh := &pb.SightingBatch{}
+			for i, c := range seen {
+				if c.Val() {
+					fresh.Id, fresh.Cell = append(fresh.Id, b.Id[i]), append(fresh.Cell, b.Cell[i])
+					fresh.Minute, fresh.Shape = append(fresh.Minute, b.Minute[i]), append(fresh.Shape, b.Shape[i])
+				}
+			}
+			if err := l.send(ctx, fresh); err != nil {
+				return err
+			}
+			if err := stream.Send(&pb.Ack{Seq: b.Seq, Rows: int64(len(fresh.Id))}); err != nil {
+				return err
+			}
+		}
+	}()
+	if err != nil {
+		cancel()
+	}
+	if cerr := l.close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 func ufo(s *Session) {
 	s.Note("%d ufo reports, about a fifth of them the same sighting reported again; the registry keeps one per place and minute", rows)
 	s.Exec(`drop table if exists bigdata_sighting`)
@@ -155,39 +213,55 @@ func ufo(s *Session) {
 		return s.checksum("bigdata_sighting")
 	}
 
-	s.race(
-		func() error { return s.execAll(`truncate bigdata_sighting`) },
-		approach{
+	trickle := func(open func(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[pb.SightingBatch, pb.Ack], error)) (string, error) {
+		stream, err := open(s.ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := sendAcked(stream, 8, batches(0, rows, fillSightings)); err != nil {
+			return "", err
+		}
+		return s.checksum("bigdata_sighting")
+	}
+
+	approaches := []approach{
+		{
 			name: "on conflict",
 			grpc: "client stream",
 			pg:   "COPY to temp, insert distinct on conflict",
 			pick: "bulk load and a simple keep-the-first rule",
 			run:  func() (string, error) { return load(s.client.LoadSightingsUpsert) },
 		},
-		approach{
+		{
 			name: "merge",
 			grpc: "client stream",
 			pg:   "COPY to temp, merge returning merge_action()",
 			pick: "reloading into a table that already has rows, and you want insert vs update counts",
 			run:  func() (string, error) { return load(s.client.LoadSightingsMerge) },
 		},
-		approach{
+		{
 			name: "pipelined",
 			grpc: "bidi, 8 in flight",
 			pg:   "unnest upserts, 4 per round trip",
 			pick: "reports trickle in all day and there is no load window to stage in",
-			run: func() (string, error) {
-				stream, err := s.client.TrickleSightings(s.ctx)
-				if err != nil {
-					return "", err
-				}
-				if err := sendAcked(stream, 8, batches(0, rows, fillSightings)); err != nil {
-					return "", err
-				}
-				return s.checksum("bigdata_sighting")
-			},
+			run:  func() (string, error) { return trickle(s.client.TrickleSightings) },
 		},
-	)
+	}
+	if s.withRedis() {
+		approaches = append(approaches, approach{
+			name: "redis seen",
+			grpc: "bidi, 8 in flight",
+			pg:   "COPY lane of first reports; HSETNX in bucketed hashes",
+			pick: "reports trickle in all day and postgres should only ever see new ones",
+			run:  func() (string, error) { return trickle(s.client.TrickleSightingsCached) },
+		})
+	}
+	s.race(func() error {
+		if err := s.resetRedis(); err != nil {
+			return err
+		}
+		return s.execAll(`truncate bigdata_sighting`)
+	}, approaches...)
 
 	s.Note("\nreports per stored sighting")
 	s.Show(`select count(*) as stored, round($1::numeric / count(*), 2) as reports_each from bigdata_sighting`, rows)

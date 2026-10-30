@@ -1,11 +1,15 @@
 package bigdata
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"playground/internal/bigdata/pb"
 )
@@ -66,6 +70,125 @@ func (s *server) IngestPingsAck(stream pb.Bigdata_IngestPingsAckServer) error {
 	}
 }
 
+const (
+	pingStream = keyPrefix + "pings"
+	pingGroup  = "copiers"
+)
+
+// IngestPingsBuffered acks a batch the moment it is in a redis stream, one
+// entry per batch holding the marshalled message. copiers in a consumer
+// group drain the stream into postgres; an entry is only deleted once its
+// COPY has committed, and one a dead copier left pending can be claimed by
+// another with XAUTOCLAIM. the ack is as durable as redis is configured to
+// be: appendfsync everysec can lose the last second
+func (s *server) IngestPingsBuffered(stream pb.Bigdata_IngestPingsBufferedServer) error {
+	s.copiers.Do(func() {
+		s.copierErr = make(chan error, 1)
+		for c := range workers {
+			go s.copier(fmt.Sprintf("copier-%d", c))
+		}
+	})
+	ctx := stream.Context()
+	for {
+		b, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		data, err := proto.Marshal(b)
+		if err != nil {
+			return err
+		}
+		if err := s.rdb.XAdd(ctx, &redis.XAddArgs{Stream: pingStream, Values: []any{"b", data}}).Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(&pb.Ack{Seq: b.Seq, Rows: int64(len(b.Id))}); err != nil {
+			return err
+		}
+	}
+}
+
+// copier takes up to 8 batches at a time and lands them in one COPY
+func (s *server) copier(name string) {
+	for s.bg.Err() == nil {
+		res, err := s.rdb.XReadGroup(s.bg, &redis.XReadGroupArgs{
+			Group: pingGroup, Consumer: name, Streams: []string{pingStream, ">"}, Count: 8, Block: 50 * time.Millisecond,
+		}).Result()
+		if err != nil {
+			// nil is a quiet stream; anything else is usually the group
+			// being recreated between runs
+			if err != redis.Nil {
+				time.Sleep(10 * time.Millisecond)
+			}
+			continue
+		}
+		var ids []string
+		var bs []*pb.PingBatch
+		for _, m := range res[0].Messages {
+			b := &pb.PingBatch{}
+			if err := proto.Unmarshal([]byte(m.Values["b"].(string)), b); err != nil {
+				s.copyFailed(err)
+				continue
+			}
+			ids, bs = append(ids, m.ID), append(bs, b)
+		}
+		next := 0
+		_, err = s.pool.CopyFrom(s.bg, pgx.Identifier{"bigdata_ping"}, pingCols,
+			pgx.CopyFromFunc(fromStream(len(pingCols), func() (*pb.PingBatch, error) {
+				if next == len(bs) {
+					return nil, io.EOF
+				}
+				next++
+				return bs[next-1], nil
+			}, func(b *pb.PingBatch) int { return len(b.Id) }, pingRow)))
+		if err != nil {
+			s.copyFailed(err)
+			continue
+		}
+		pipe := s.rdb.TxPipeline()
+		pipe.XAck(s.bg, pingStream, pingGroup, ids...)
+		pipe.XDel(s.bg, pingStream, ids...)
+		if _, err := pipe.Exec(s.bg); err != nil {
+			s.copyFailed(err)
+		}
+	}
+}
+
+func (s *server) copyFailed(err error) {
+	if s.bg.Err() != nil {
+		return
+	}
+	select {
+	case s.copierErr <- err:
+	default:
+	}
+}
+
+// Drain returns once every buffered batch has been copied and deleted
+func (s *server) Drain(ctx context.Context, _ *pb.Empty) (*pb.Summary, error) {
+	for {
+		select {
+		case err := <-s.copierErr:
+			return nil, err
+		default:
+		}
+		n, err := s.rdb.XLen(ctx, pingStream).Result()
+		if err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			return &pb.Summary{}, nil
+		}
+		select {
+		case <-time.After(5 * time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
 func rocket(s *Session) {
 	s.Note("%d telemetry pings from the launch pad have to land in mission control's postgres, durably", rows)
 	s.Exec(`drop table if exists bigdata_ping`)
@@ -80,9 +203,8 @@ func rocket(s *Session) {
 		return err
 	}
 
-	s.race(
-		func() error { return s.execAll(`truncate bigdata_ping`) },
-		approach{
+	approaches := []approach{
+		{
 			name: "copy",
 			grpc: "client stream",
 			pg:   "CopyFrom off the stream",
@@ -94,7 +216,7 @@ func rocket(s *Session) {
 				return s.checksum("bigdata_ping")
 			},
 		},
-		approach{
+		{
 			name: "parallel",
 			grpc: "N client streams",
 			pg:   "N concurrent COPYs",
@@ -110,7 +232,7 @@ func rocket(s *Session) {
 				return s.checksum("bigdata_ping")
 			},
 		},
-		approach{
+		{
 			name: "acked",
 			grpc: "bidi, 8 in flight",
 			pg:   "unnest insert, commit per batch",
@@ -126,7 +248,45 @@ func rocket(s *Session) {
 				return s.checksum("bigdata_ping")
 			},
 		},
-	)
+	}
+	var acked time.Duration
+	if s.withRedis() {
+		approaches = append(approaches, approach{
+			name: "redis buffer",
+			grpc: "bidi, 64 in flight",
+			pg:   "consumer group copiers, COPY 8 batches at a time",
+			pick: "producers need a fast ack and postgres can lag a little behind",
+			run: func() (string, error) {
+				start := time.Now()
+				stream, err := s.client.IngestPingsBuffered(s.ctx)
+				if err != nil {
+					return "", err
+				}
+				if err := sendAcked(stream, 64, batches(0, rows, fillPings)); err != nil {
+					return "", err
+				}
+				acked = time.Since(start)
+				if _, err := s.client.Drain(s.ctx, &pb.Empty{}); err != nil {
+					return "", err
+				}
+				return s.checksum("bigdata_ping")
+			},
+		})
+	}
+	s.race(func() error {
+		if err := s.resetRedis(); err != nil {
+			return err
+		}
+		if s.rdb != nil {
+			if err := s.rdb.XGroupCreateMkStream(s.ctx, pingStream, pingGroup, "0").Err(); err != nil {
+				return err
+			}
+		}
+		return s.execAll(`truncate bigdata_ping`)
+	}, approaches...)
+	if acked > 0 {
+		s.Note("\nredis acked every batch after %s; the rest of its time was postgres catching up", acked.Round(time.Millisecond))
+	}
 
 	s.Note("\nhighest ping and the hottest sensor")
 	s.Show(`select max(alt)::int as apogee_m,
