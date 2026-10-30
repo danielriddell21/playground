@@ -20,7 +20,7 @@ Node ports are 30432 postgres, 30092 kafka, 30379 redis.
 ## Tools
 
 ```
-go run . bigdata all       needs postgres
+go run . bigdata all       needs postgres, redis optional
 go run . dapr all          needs redis + daprd
 go run . graphql all       nothing needed
 go run . grpc all          nothing needed
@@ -48,6 +48,20 @@ steps     in+out  copy then group by, running totals, list partitions
 coffee    both    bidi insert returning, copy then set based, unary fanout
 fraud     both    card state per batch, one window, staged server pipeline
 ```
+
+`--redis localhost:6379` (or `$REDIS_URL`) adds a fourth approach where redis
+holds the hot state and postgres only takes COPY. It still has to land the
+same rows in postgres and agree with the other three:
+
+```
+rocket    stream buffer, acked on XADD, consumer group copiers COPY to postgres
+ufo       HSETNX in bucketed hashes, only first reports reach postgres
+steps     ZINCRBY sorted set leaderboard, raw pings down a COPY lane
+fraud     last swipe per card in a hash, swipes down a COPY lane
+```
+
+Redis acks are only as durable as its persistence; `appendfsync everysec` can
+lose the last second.
 
 `mix graph` needs postgres 19 and skips itself on anything older.
 
