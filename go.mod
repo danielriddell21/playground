@@ -6,7 +6,9 @@ require (
 	github.com/dapr/go-sdk v1.15.0
 	github.com/graphql-go/graphql v0.8.1
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/spf13/cobra v1.10.2
+	github.com/tetratelabs/wazero v1.8.0
 	github.com/twmb/franz-go v1.21.5
 	github.com/twmb/franz-go/pkg/kadm v1.18.0
 	go.opentelemetry.io/otel v1.44.0
@@ -36,7 +38,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
-	github.com/redis/go-redis/v9 v9.7.3 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.7.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect

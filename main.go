@@ -18,6 +18,7 @@ import (
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
 	sqlcplay "playground/internal/sqlcplay"
+	"playground/internal/wasmplay"
 )
 
 func main() {
@@ -34,6 +35,7 @@ func main() {
 	root.AddCommand(mix.Command())
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(sqlcplay.Command())
+	root.AddCommand(wasmplay.Command())
 	root.AddCommand(fga.Command())
 	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
