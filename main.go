@@ -19,6 +19,7 @@ import (
 	"playground/internal/postgres"
 	sqlcplay "playground/internal/sqlcplay"
 	"playground/internal/wasmplay"
+	"playground/internal/xdsplay"
 )
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 	root.AddCommand(otelplay.Command())
 	root.AddCommand(sqlcplay.Command())
 	root.AddCommand(wasmplay.Command())
+	root.AddCommand(xdsplay.Command())
 	root.AddCommand(fga.Command())
 	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
