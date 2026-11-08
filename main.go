@@ -20,6 +20,7 @@ import (
 	sqlcplay "playground/internal/sqlcplay"
 	"playground/internal/wasmplay"
 	"playground/internal/xdsplay"
+	"playground/internal/zerotrust"
 )
 
 func main() {
@@ -38,6 +39,7 @@ func main() {
 	root.AddCommand(sqlcplay.Command())
 	root.AddCommand(wasmplay.Command())
 	root.AddCommand(xdsplay.Command())
+	root.AddCommand(zerotrust.Command())
 	root.AddCommand(fga.Command())
 	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
