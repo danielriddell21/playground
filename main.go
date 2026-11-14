@@ -17,6 +17,7 @@ import (
 	fga "playground/internal/openfga"
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
+	"playground/internal/resilience"
 	sqlcplay "playground/internal/sqlcplay"
 	"playground/internal/wasmplay"
 	"playground/internal/xdsplay"
@@ -43,6 +44,7 @@ func main() {
 	root.AddCommand(fga.Command())
 	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
+	root.AddCommand(resilience.Command())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
