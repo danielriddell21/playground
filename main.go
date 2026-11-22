@@ -15,6 +15,7 @@ import (
 	"playground/internal/melange"
 	"playground/internal/mix"
 	fga "playground/internal/openfga"
+	"playground/internal/operator"
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
 	"playground/internal/resilience"
@@ -42,6 +43,7 @@ func main() {
 	root.AddCommand(xdsplay.Command())
 	root.AddCommand(zerotrust.Command())
 	root.AddCommand(fga.Command())
+	root.AddCommand(operator.Command())
 	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
 	root.AddCommand(resilience.Command())
