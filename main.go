@@ -19,6 +19,7 @@ import (
 	otelplay "playground/internal/otel"
 	"playground/internal/postgres"
 	"playground/internal/resilience"
+	"playground/internal/restateplay"
 	sqlcplay "playground/internal/sqlcplay"
 	"playground/internal/wasmplay"
 	"playground/internal/xdsplay"
@@ -47,6 +48,7 @@ func main() {
 	root.AddCommand(melange.Command())
 	root.AddCommand(postgres.Command())
 	root.AddCommand(resilience.Command())
+	root.AddCommand(restateplay.Command())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
