@@ -31,6 +31,12 @@ go run . postgres all      needs postgres
 go run . sqlc all          needs postgres + sqlc cli
 go run . openfga all       needs the openfga binary
 go run . melange all       needs postgres + melange cli
+go run . operator all      nothing needed
+go run . resilience all    nothing needed
+go run . restate all       needs restate-server
+go run . wasm all          nothing needed, run from the repo root
+go run . xds all           nothing needed
+go run . zerotrust all     nothing needed
 ```
 
 `go run . <tool> --help` lists the demos. `--dsn` overrides the connection.
